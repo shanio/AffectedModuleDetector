@@ -247,6 +247,7 @@ class AffectedModuleDetectorPlugin : Plugin<Project> {
     private fun filterJvmTests(project: Project) {
         project.tasks.withType(Test::class.java).configureEach { task ->
             AffectedModuleDetector.configureTaskGuard(task)
+            AffectedModuleDetector.configureJvmTestTask(task)
         }
     }
 

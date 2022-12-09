@@ -32,6 +32,7 @@ import org.gradle.api.Project
 import org.gradle.api.Task
 import org.gradle.api.invocation.Gradle
 import org.gradle.api.logging.Logger
+import org.gradle.api.tasks.testing.Test
 import java.io.File
 
 /**
@@ -71,6 +72,9 @@ enum class ProjectSubset { DEPENDENT_PROJECTS, CHANGED_PROJECTS, ALL_AFFECTED_PR
  * module is affected per the [ProjectSubset] rules, and included in the list.  If it is not
  * provided, it will follow [ProjectSubset]
  *
+ * [EXCLUDE_JVM_TEST_PATHS] takes a comma delimited list of file patterns. Exclude patterns provided
+ * are applied to all jvm test tasks.
+ *
  * Currently, it checks git logs to find the files changed in the last commit
  *
  * Since this needs to check project dependency graph to work, it cannot be accessed before
@@ -83,6 +87,8 @@ abstract class AffectedModuleDetector {
      * Can only be called during the execution phase
      */
     abstract fun shouldInclude(project: Project): Boolean
+
+    abstract fun excludeTestPaths(task: Test)
 
     /**
      * Returns true if at least one project has been affected
@@ -112,6 +118,7 @@ abstract class AffectedModuleDetector {
         private const val DEPENDENT_PROJECTS_ARG = "affected_module_detector.dependentProjects"
         private const val CHANGED_PROJECTS_ARG = "affected_module_detector.changedProjects"
         private const val ENABLE_ARG = "affected_module_detector.enable"
+        private const val EXCLUDE_JVM_TEST_PATHS = "exclude_test_paths"
         var isConfigured = false
 
         @JvmStatic
@@ -119,12 +126,19 @@ abstract class AffectedModuleDetector {
             require(rootProject == rootProject.rootProject) {
                 "Project provided must be root, project was ${rootProject.path}"
             }
-            
+
+            val excludedTestPaths =
+                if (rootProject.hasProperty(EXCLUDE_JVM_TEST_PATHS)) {
+                    (rootProject.property("EXCLUDE_JVM_TEST_PATHS") as String).split(",")
+                } else {
+                    emptyList()
+                }
+
             val enabled = isProjectEnabled(rootProject)
             if (!enabled) {
                 setInstance(
                     rootProject,
-                    AcceptAll()
+                    AcceptAll(excludedTestPaths = excludedTestPaths)
                 )
                 return
             }
@@ -168,7 +182,8 @@ abstract class AffectedModuleDetector {
                 ignoreUnknownProjects = true,
                 projectSubset = subset,
                 modules = modules,
-                config = config
+                config = config,
+                excludedTestPaths = excludedTestPaths
             ).also {
                 logger.info("Using real detector with $subset")
                 setInstance(
@@ -238,6 +253,18 @@ abstract class AffectedModuleDetector {
         }
 
         /**
+         * Call this method to define jvm test task's excluded test paths provided as a command
+         * line parameter.
+         */
+        @Throws(GradleException::class)
+        @JvmStatic
+        fun configureJvmTestTask(testTask: Test) {
+            getOrThrow(
+                testTask.project
+            ).excludeTestPaths(testTask)
+        }
+
+        /**
          * Call this method to determine if the project was affected in this change
          *
          * Can only be called during the execution phase
@@ -285,12 +312,18 @@ abstract class AffectedModuleDetector {
  */
 private class AcceptAll(
     private val wrapped: AffectedModuleDetector? = null,
-    private val logger: Logger? = null
+    private val logger: Logger? = null,
+    private val excludedTestPaths: List<String>? = null,
 ) : AffectedModuleDetector() {
     override fun shouldInclude(project: Project): Boolean {
         val wrappedResult = wrapped?.shouldInclude(project)
         logger?.info("[AcceptAll] wrapper returned $wrappedResult but I'll return true")
         return true
+    }
+
+    override fun excludeTestPaths(task: Test) {
+        if (excludedTestPaths == null) return
+        task.exclude(excludedTestPaths)
     }
 
     override fun hasAffectedProjects() = true
@@ -319,6 +352,7 @@ class AffectedModuleDetectorImpl constructor(
     private val projectSubset: ProjectSubset = ProjectSubset.ALL_AFFECTED_PROJECTS,
     private val injectedGitClient: GitClient? = null,
     private val modules: Set<String>? = null,
+    private val excludedTestPaths: List<String>? = null,
     private val config: AffectedModuleConfiguration
 ) : AffectedModuleDetector() {
 
@@ -374,6 +408,11 @@ class AffectedModuleDetectorImpl constructor(
         logger?.info("checking whether I should include ${project.path} and my answer is $shouldInclude")
 
         return shouldInclude
+    }
+
+    override fun excludeTestPaths(task: Test) {
+        if (excludedTestPaths == null) return
+        task.exclude(excludedTestPaths)
     }
 
     override fun hasAffectedProjects() = affectedProjects.isNotEmpty()
