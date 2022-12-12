@@ -2,7 +2,7 @@ plugins {
     id 'java-library'
     id 'kotlin'
     id 'java-gradle-plugin'
-    id "com.vanniktech.maven.publish"
+    id "maven-publish"
 }
 
 apply from: rootProject.file("gradle/jacoco.gradle")
@@ -19,8 +19,34 @@ jacoco {
 gradlePlugin {
     plugins {
         affectedModuleDetectorPlugin {
-            id = GROUP
+            id = "com.dropbox.affectedmoduledetectorexclude"
             implementationClass = "com.dropbox.affectedmoduledetector.AffectedModuleDetectorPlugin"
+            version = "0.2.0.1-SNAPSHOT"
+        }
+    }
+}
+
+publishing {
+    repositories {
+        maven {
+            url = "https://gitlab.skypicker.com/api/v4/projects/301/packages/maven"
+            credentials(HttpHeaderCredentials) {
+                name = "Private-Token"
+                value = System.getenv("DEPLOYMENT_TOKEN")
+            }
+            authentication {
+                header(HttpHeaderAuthentication)
+            }
+        }
+    }
+
+    publications {
+        maven(MavenPublication) {
+            groupId = 'com.dropbox.affectedmoduledetectorexclude'
+            artifactId = 'affectedmoduledetectorexclude'
+            version = '0.2.0.1-SNAPSHOT'
+
+            from components.java
         }
     }
 }
